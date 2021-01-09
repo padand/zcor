@@ -16,6 +16,8 @@
 // store scanned caliper data
 float caliperData = 0;
 void scanCaliper(unsigned int axis);
+// resets calipers to zero
+void resetCalipers();
 
 //================================================= SPI PROTOCOL
 
@@ -60,17 +62,22 @@ void setup(){
 //================================================= SPI interrupt routine
 ISR (SPI_STC_vect) {
   reg = SPDR;
-  if(reg>0 && reg<10) {
+  if(reg==0) {
+    resetCalipers();
+  } else if(reg>0 && reg<10) {
     DEBUG("Scan axis:");
     DEBUG(reg);
     scanAxis(reg);
   } else if(reg==10) {
     DEBUG("Check axis ready, return position status");
-    SPDR = 10 + isAxisReady?1:0;
+    if(isAxisReady) {
+      SPDR=11;
+    }
   } else if(reg==100) {
-    DEBUG("Request axis value at index");
+    DEBUG("Request axis value:");
+    DEBUG(axisValue);
     incrementAxisValueIndex();
-    SPDR = 100 * axisValueIndex + axisValue[axisValueIndex];
+    SPDR = 100 + axisValue[axisValueIndex];
   }
 }
 
@@ -81,7 +88,7 @@ void loop(){
 
 //================================================= IMPLEMENTATIONS
 
-void scanCaliper() {
+void scanCaliper(unsigned int axis) {
   // TODO: dummy data used; scan actual caliper value
   caliperData += 0.2f;
   delay(1000);
@@ -89,6 +96,11 @@ void scanCaliper() {
   if(caliperData<0) {
     caliperData *= -1;
   }
+}
+
+void resetCalipers() {
+  // TODO: dummy reset; need to interupt caliper power
+  caliperData = 0;
 }
 
 void scanAxis(unsigned int axis) {
