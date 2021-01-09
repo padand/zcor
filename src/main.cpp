@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include <SPI.h>
 
-// debugging
+//================================================= DEBUGGING
+
 #define ENABLE_DEBUG
 #define BAUD 9600
 #ifdef ENABLE_DEBUG
@@ -10,27 +11,43 @@
   #define DEBUG(a)
 #endif
 
-// define response format
-char res[10];
-#define RES_OK       'y'
-#define RES_NOK      'n'
-#define RES_STR(STR) do{ strcpy(res, '^'); strcat(res, STR); strcat(res, '$') }while(false)
-#define SEND_
+//================================================= CALIPER
 
-// define request format
-volatile char req;
-#define REQ_RESET     'z'
-#define REQ_POS_LEFT  'l'
-#define REQ_POS_RIGHT 'r'
+// store scanned caliper data
+float caliperData = 0;
+void scanCaliper();
+// resets calipers to zero
+void resetCalipers();
 
-inline void sendRes() {
-  for (unsigned int i=0; i<strlen(res); i++){
-    DEBUG("Send:");
-    DEBUG(res[i]);
-    // send the response value via the data register
-    SPDR = res[i];
-  }
-}
+//================================================= SPI PROTOCOL
+
+// holds registry data
+volatile unsigned int reg;
+
+// which axis is currently selected
+volatile unsigned int axisSelected;
+
+// used to signal an axis rescan from the ISR
+volatile bool axisReady = false;
+
+// rescan axis position
+void scanAxis();
+
+#define AXIS_VALUE_SIZE 6
+#define AXIS_VALUE_DECIMALS 2
+// current axis value (eg: 101.43)
+// negative values not allowed!
+char axisValue[AXIS_VALUE_SIZE];
+// current index for the axis value
+volatile unsigned int axisValueIndex = 0;
+// increments the index for the axis value,
+// making shure to start over if the end was reached
+void incrementAxisValueIndex();
+
+// used to signal a caliper reset from the ISR
+volatile bool caliperReady = false;
+
+//================================================= SETUP
 
 void setup(){
   #ifdef ENABLE_DEBUG
@@ -38,35 +55,84 @@ void setup(){
   #endif
   DEBUG("Debug on");
 
-  // set MISO as OUTPUT (have to send data to master in)
-  pinMode(MISO,OUTPUT);
-  // set MOSI as INPUT (have to receive data from master out)
-  pinMode(MOSI,INPUT);
+  // have to send on master in, *slave out*
+  pinMode(MISO, OUTPUT);
 
-  // turn on SPI in Slave Mode
+  // turn on SPI in slave mode
   SPCR |= _BV(SPE);
 
-  // turn on SPI interrupts
-  SPI.attachInterrupt();
+  // turn on interrupts
+  SPCR |= _BV(SPIE);
 }
 
-// SPI interrupt routine
-ISR (SPI_STC_vect){
-  // grab byte from SPI Data Register
-  req = SPDR;
-  DEBUG("Received:");
-  DEBUG(req);
-
-  switch(req) {
-    case REQ_RESET:
-      SPDR = RES_OK;
-      break;
-    default:
-      SPDR = RES_NOK;
-      break;
+//================================================= SPI interrupt routine
+ISR (SPI_STC_vect) {
+  reg = SPDR;
+  if(reg==0) {
+    caliperReady = false;
+  } else if(reg>0 && reg<10) {
+    axisSelected = reg;
+    axisReady = false;
+  } else if(reg==10 && axisReady) {
+    SPDR=11;
+  } else if(reg==100 && axisReady && caliperReady) {
+    incrementAxisValueIndex();
+    SPDR = 100 + axisValue[axisValueIndex];
   }
 }
 
+//================================================= MAIN LOOP
 void loop(){
+  // runs if ISR not active
+  if (!caliperReady) {
+    DEBUG("Start caliper reset");
+    resetCalipers();
+    DEBUG("End caliper reset");
+    caliperReady = true;
+  }
+  if (!axisReady && caliperReady) {
+    DEBUG("Start axis scan");
+    scanAxis();
+    DEBUG("End axis scan:");
+    DEBUG(axisValue);
+    axisReady = true;
+  }
+}
+
+//================================================= IMPLEMENTATIONS
+
+void scanCaliper() {
+  // TODO: dummy data used; scan actual caliper value
+  caliperData += 0.2f;
+  delay(900);
+  // prevent negative values
+  if(caliperData<0) {
+    caliperData *= -1;
+  }
+}
+
+void resetCalipers() {
+  // TODO: dummy reset; need to interupt caliper power
+  caliperData = 0;
   delay(500);
+}
+
+void scanAxis() {
+  scanCaliper();
+  dtostrf(caliperData, AXIS_VALUE_SIZE, AXIS_VALUE_DECIMALS, axisValue);
+  // pad unused values with 0
+  unsigned int i=0;
+  while(axisValue[i]==' ' && i<AXIS_VALUE_SIZE) {
+    axisValue[i]='0';
+    i++;
+  }
+  axisValueIndex = 0;
+}
+
+void incrementAxisValueIndex() {
+  if(axisValueIndex < AXIS_VALUE_SIZE-1){
+    axisValueIndex++;
+  } else {
+    axisValueIndex=0;
+  }
 }
