@@ -10,25 +10,48 @@
   #define DEBUG(a)
 #endif
 
-// define response format
-char res[10];
-#define RES_OK       'y'
-#define RES_NOK      'n'
-#define RES_STR(STR) do{ strcpy(res, '^'); strcat(res, STR); strcat(res, '$') }while(false)
-#define SEND_
+// caliper data
+float caliperLeft = 0;
+float caliperRight = 0;
 
-// define request format
-volatile char req;
-#define REQ_RESET     'z'
-#define REQ_POS_LEFT  'l'
-#define REQ_POS_RIGHT 'r'
+// define response format
+#define CALIPER_STR_SIZE 7 // eg -100.00
+#define RES_SIZE CALIPER_STR_SIZE*2 + 3
+char caliperStr[CALIPER_STR_SIZE + 1];
+char res[RES_SIZE + 1];
+#define RES_START     "^"
+#define RES_END       "$"
+#define RES_SEPARATOR "|"
+
+
+void floatToCaliperStr(const float *f) {
+  dtostrf(*f, CALIPER_STR_SIZE * -1, 2, caliperStr);
+  unsigned int i=0;
+  bool trimmed = false;
+  while(!trimmed && i < CALIPER_STR_SIZE) {
+    if(caliperStr[i] == ' ') {
+      caliperStr[i] = '\0';
+      trimmed = true;
+    }
+    i++;
+  }
+}
+
+inline void formatRes() {
+  strcpy(res, RES_START);
+  floatToCaliperStr(&caliperLeft);
+  strcat(res, caliperStr);
+  strcat(res, RES_SEPARATOR);
+  floatToCaliperStr(&caliperRight);
+  strcat(res, caliperStr);
+  strcat(res, RES_END);
+}
 
 inline void sendRes() {
+  SPI.transfer(0x00);
   for (unsigned int i=0; i<strlen(res); i++){
-    DEBUG("Send:");
-    DEBUG(res[i]);
     // send the response value via the data register
-    SPDR = res[i];
+    SPI.transfer(res[i]);
   }
 }
 
@@ -38,35 +61,20 @@ void setup(){
   #endif
   DEBUG("Debug on");
 
-  // set MISO as OUTPUT (have to send data to master in)
-  pinMode(MISO,OUTPUT);
-  // set MOSI as INPUT (have to receive data from master out)
-  pinMode(MOSI,INPUT);
+  // switch to slave
+  pinMode(SS, INPUT);
+  pinMode(MISO, OUTPUT);
+  pinMode(MOSI, INPUT);
 
-  // turn on SPI in Slave Mode
-  SPCR |= _BV(SPE);
-
-  // turn on SPI interrupts
-  SPI.attachInterrupt();
-}
-
-// SPI interrupt routine
-ISR (SPI_STC_vect){
-  // grab byte from SPI Data Register
-  req = SPDR;
-  DEBUG("Received:");
-  DEBUG(req);
-
-  switch(req) {
-    case REQ_RESET:
-      SPDR = RES_OK;
-      break;
-    default:
-      SPDR = RES_NOK;
-      break;
-  }
+  SPCR = _BV(SPE) | _BV(SPR0);
 }
 
 void loop(){
-  delay(500);
+  formatRes();
+  DEBUG("Send:");
+  DEBUG(res);
+  sendRes();
+  caliperLeft += 0.02f;
+  caliperRight -= 0.02f;
+  delay(1000);
 }
