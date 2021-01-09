@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include <SPI.h>
 
-// debugging
+//================================================= DEBUGGING
+
 #define ENABLE_DEBUG
 #define BAUD 9600
 #ifdef ENABLE_DEBUG
@@ -10,50 +11,35 @@
   #define DEBUG(a)
 #endif
 
-// caliper data
-float caliperLeft = 0;
-float caliperRight = 0;
+//================================================= CALIPER
 
-// define response format
-#define CALIPER_STR_SIZE 7 // eg -100.00
-#define RES_SIZE CALIPER_STR_SIZE*2 + 3
-char caliperStr[CALIPER_STR_SIZE + 1];
-char res[RES_SIZE + 1];
-#define RES_START     "^"
-#define RES_END       "$"
-#define RES_SEPARATOR "|"
+// store scanned caliper data
+float caliperData = 0;
+void scanCaliper(unsigned int axis);
 
+//================================================= SPI PROTOCOL
 
-void floatToCaliperStr(const float *f) {
-  dtostrf(*f, CALIPER_STR_SIZE * -1, 2, caliperStr);
-  unsigned int i=0;
-  bool trimmed = false;
-  while(!trimmed && i < CALIPER_STR_SIZE) {
-    if(caliperStr[i] == ' ') {
-      caliperStr[i] = '\0';
-      trimmed = true;
-    }
-    i++;
-  }
-}
+// holds registry data
+volatile unsigned int reg;
 
-inline void formatRes() {
-  strcpy(res, RES_START);
-  floatToCaliperStr(&caliperLeft);
-  strcat(res, caliperStr);
-  strcat(res, RES_SEPARATOR);
-  floatToCaliperStr(&caliperRight);
-  strcat(res, caliperStr);
-  strcat(res, RES_END);
-}
+// rescan axis position
+void scanAxis(unsigned int axis);
 
-inline void sendRes() {
-  SPI.transfer(0x00);
-  for (unsigned int i=0; i<strlen(res); i++){
-    // send the response value via the data register
-    SPI.transfer(res[i]);
-  }
-}
+// checks if axis position has finished scanning
+volatile bool isAxisReady = false;
+
+#define AXIS_VALUE_SIZE 6
+#define AXIS_VALUE_DECIMALS 2
+// current axis value (eg: 101.43)
+// negative values not allowed!
+char axisValue[AXIS_VALUE_SIZE];
+// current index for the axis value
+volatile unsigned int axisValueIndex = 0;
+// increments the index for the axis value,
+// making shure to start over if the end was reached
+void incrementAxisValueIndex();
+
+//================================================= SETUP
 
 void setup(){
   #ifdef ENABLE_DEBUG
@@ -61,20 +47,68 @@ void setup(){
   #endif
   DEBUG("Debug on");
 
-  // switch to slave
-  pinMode(SS, INPUT);
+  // have to send on master in, *slave out*
   pinMode(MISO, OUTPUT);
-  pinMode(MOSI, INPUT);
 
-  SPCR = _BV(SPE) | _BV(SPR0);
+  // turn on SPI in slave mode
+  SPCR |= _BV(SPE);
+
+  // turn on interrupts
+  SPCR |= _BV(SPIE);
 }
 
+//================================================= SPI interrupt routine
+ISR (SPI_STC_vect) {
+  reg = SPDR;
+  if(reg>0 && reg<10) {
+    DEBUG("Scan axis:");
+    DEBUG(reg);
+    scanAxis(reg);
+  } else if(reg==10) {
+    DEBUG("Check axis ready, return position status");
+    SPDR = 10 + isAxisReady?1:0;
+  } else if(reg==100) {
+    DEBUG("Request axis value at index");
+    incrementAxisValueIndex();
+    SPDR = 100 * axisValueIndex + axisValue[axisValueIndex];
+  }
+}
+
+//================================================= MAIN LOOP
 void loop(){
-  formatRes();
-  DEBUG("Send:");
-  DEBUG(res);
-  sendRes();
-  caliperLeft += 0.02f;
-  caliperRight -= 0.02f;
+  // runs if SPI not active
+}
+
+//================================================= IMPLEMENTATIONS
+
+void scanCaliper() {
+  // TODO: dummy data used; scan actual caliper value
+  caliperData += 0.2f;
   delay(1000);
+  // prevent negative values
+  if(caliperData<0) {
+    caliperData *= -1;
+  }
+}
+
+void scanAxis(unsigned int axis) {
+  isAxisReady = false;
+  scanCaliper(axis);
+  dtostrf(caliperData, AXIS_VALUE_SIZE, AXIS_VALUE_DECIMALS, axisValue);
+  // pad unused values with 0
+  unsigned int i=0;
+  while(axisValue[i]==' ' && i<AXIS_VALUE_SIZE) {
+    axisValue[i]='0';
+    i++;
+  }
+  axisValueIndex = 0;
+  isAxisReady = true;
+}
+
+void incrementAxisValueIndex() {
+  if(axisValueIndex < AXIS_VALUE_SIZE-1){
+    axisValueIndex++;
+  } else {
+    axisValueIndex=0;
+  }
 }
