@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include<caliper.h>
 
 //================================================= DEBUGGING
 
@@ -13,10 +14,14 @@
 
 //================================================= CALIPER
 
+// init caliper
+Caliper caliper(4,5,2);
+
 // store scanned caliper data
 float caliperData = 0;
-void scanCaliper();
+
 // resets calipers to zero
+// TODO: add caliper reset pin
 void resetCalipers();
 
 //================================================= SPI PROTOCOL
@@ -30,8 +35,8 @@ volatile unsigned int axisSelected;
 // used to signal an axis rescan from the ISR
 volatile bool axisReady = false;
 
-// rescan axis position
-void scanAxis();
+// serialize caliper data for SPI transmission
+void parseAxisValue();
 
 #define AXIS_VALUE_SIZE 6
 #define AXIS_VALUE_DECIMALS 2
@@ -92,24 +97,18 @@ void loop(){
   }
   if (!axisReady && caliperReady) {
     DEBUG("Start axis scan");
-    scanAxis();
-    DEBUG("End axis scan:");
-    DEBUG(axisValue);
-    axisReady = true;
+    if (caliper.read(&caliperData)) {
+      // negative data not currently supported
+      if(caliperData<0) caliperData = 0.0f;
+      parseAxisValue();
+      DEBUG("End axis scan:");
+      DEBUG(axisValue);
+      axisReady = true;
+    }
   }
 }
 
 //================================================= IMPLEMENTATIONS
-
-void scanCaliper() {
-  // TODO: dummy data used; scan actual caliper value
-  caliperData += 0.2f;
-  delay(900);
-  // prevent negative values
-  if(caliperData<0) {
-    caliperData *= -1;
-  }
-}
 
 void resetCalipers() {
   // TODO: dummy reset; need to interupt caliper power
@@ -117,8 +116,7 @@ void resetCalipers() {
   delay(500);
 }
 
-void scanAxis() {
-  scanCaliper();
+void parseAxisValue() {
   dtostrf(caliperData, AXIS_VALUE_SIZE, AXIS_VALUE_DECIMALS, axisValue);
   // pad unused values with 0
   unsigned int i=0;
