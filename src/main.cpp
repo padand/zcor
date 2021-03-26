@@ -4,7 +4,7 @@
 
 //================================================= DEBUGGING
 
-#define ENABLE_DEBUG
+//#define ENABLE_DEBUG
 #define BAUD 9600
 #ifdef ENABLE_DEBUG
   #define DEBUG(a) (Serial.println(a))
@@ -15,7 +15,7 @@
 //================================================= CALIPER
 
 // init caliper
-Caliper caliper(4,5,2);
+Caliper caliper(8,9,2);
 
 // store scanned caliper data
 float caliperData = 0;
@@ -33,7 +33,7 @@ volatile unsigned int reg;
 volatile unsigned int axisSelected;
 
 // used to signal an axis rescan from the ISR
-volatile bool axisReady = false;
+volatile bool axisReady = true;
 
 // serialize caliper data for SPI transmission
 void parseAxisValue();
@@ -68,6 +68,9 @@ void setup(){
 
   // turn on interrupts
   SPCR |= _BV(SPIE);
+
+  // set clock speed: clock ÷ 16
+  SPCR |= _BV(SPR0);
 }
 
 //================================================= SPI interrupt routine
@@ -79,7 +82,7 @@ ISR (SPI_STC_vect) {
     axisSelected = reg;
     axisReady = false;
   } else if(reg==10 && axisReady) {
-    SPDR=11;
+    SPDR=10 + axisSelected;
   } else if(reg==100 && axisReady && caliperReady) {
     incrementAxisValueIndex();
     SPDR = 100 + axisValue[axisValueIndex];
@@ -104,6 +107,8 @@ void loop(){
       DEBUG("End axis scan:");
       DEBUG(axisValue);
       axisReady = true;
+    } else {
+      DEBUG("Axis scan error");
     }
   }
 }
