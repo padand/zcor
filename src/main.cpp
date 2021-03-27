@@ -71,6 +71,8 @@ void setup(){
 
   // set clock speed
   SPI.setClockDivider(SPI_CLOCK_DIV8);
+  SPI.setBitOrder(MSBFIRST);
+  SPI.setDataMode(SPI_MODE0);
 }
 
 //================================================= SPI interrupt routine
