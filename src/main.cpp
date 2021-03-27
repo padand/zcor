@@ -69,8 +69,8 @@ void setup(){
   // turn on interrupts
   SPCR |= _BV(SPIE);
 
-  // set clock speed: clock ÷ 16
-  SPCR |= _BV(SPR0);
+  // set clock speed
+  SPI.setClockDivider(SPI_CLOCK_DIV8);
 }
 
 //================================================= SPI interrupt routine
