@@ -4,7 +4,7 @@
 
 //================================================= DEBUGGING
 
-//#define ENABLE_DEBUG
+// #define ENABLE_DEBUG
 #define BAUD 9600
 #ifdef ENABLE_DEBUG
   #define DEBUG(a) (Serial.println(a))
@@ -15,7 +15,8 @@
 //================================================= CALIPER
 
 // init caliper
-Caliper caliper(8,9,2);
+Caliper calipers[2] = {Caliper(8,9,2), Caliper(4,5,2)};
+static const unsigned int calipersCount = sizeof(calipers) / sizeof(calipers[0]);
 
 // store scanned caliper data
 float caliperData = 0;
@@ -31,6 +32,10 @@ volatile unsigned int reg;
 
 // which axis is currently selected
 volatile unsigned int axisSelected;
+
+#define AXIS_INTERNAL_TO_EXTERNAL(axis) ((axis) + 1)
+#define AXIS_EXTERNAL_TO_INTERNAL(axis) ((axis) - 1)
+#define IS_EXTERNAL_AXIS_VALID(axis) ((axis) <= (calipersCount))
 
 // used to signal an axis rescan from the ISR
 volatile bool axisReady = true;
@@ -79,11 +84,11 @@ ISR (SPI_STC_vect) {
   reg = SPDR;
   if(reg==0) {
     caliperReady = false;
-  } else if(reg>0 && reg<10) {
-    axisSelected = reg;
+  } else if(reg>0 && reg<10 && IS_EXTERNAL_AXIS_VALID(reg)) {
+    axisSelected = AXIS_EXTERNAL_TO_INTERNAL(reg);
     axisReady = false;
   } else if(reg==10 && axisReady) {
-    SPDR=10 + axisSelected;
+    SPDR=10 + AXIS_INTERNAL_TO_EXTERNAL(axisSelected);
   } else if(reg==100 && axisReady && caliperReady) {
     incrementAxisValueIndex();
     SPDR = 100 + axisValue[axisValueIndex];
@@ -101,7 +106,7 @@ void loop(){
   }
   if (!axisReady && caliperReady) {
     DEBUG("Start axis scan");
-    if (caliper.read(&caliperData)) {
+    if (calipers[axisSelected].read(&caliperData)) {
       // negative data not currently supported
       if(caliperData<0) caliperData = 0.0f;
       parseAxisValue();
